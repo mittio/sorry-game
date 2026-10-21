@@ -8,14 +8,12 @@
 //! interactive layer and is locked in by
 //! `tests/interactive.rs::interactive_history_matches_simulator_history_byte_for_byte`.
 
-use rand::SeedableRng;
-use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
 use crate::board::{BoardState, PlayerId, SpaceId};
 use crate::card::Card;
-use crate::engine::Engine;
+use crate::engine::{Engine, GameRngs};
 use crate::error::{Result, SorryError};
 use crate::history::{Action, GameHistory, TurnRecord};
 use crate::moves::{Move, legal_moves};
@@ -127,7 +125,7 @@ pub struct PlayerView {
 pub struct InteractiveGame {
     rules: Box<dyn Rules>,
     board: BoardState,
-    rng: StdRng,
+    rngs: GameRngs,
     deck: Vec<Card>,
     discard: Vec<Card>,
     hands: Vec<Vec<Card>>,
@@ -167,9 +165,9 @@ impl InteractiveGame {
             });
         }
 
-        let mut rng = StdRng::seed_from_u64(seed);
+        let mut rngs = GameRngs::new(seed, num_players);
         let mut deck = rules.build_deck();
-        deck.shuffle(&mut rng);
+        deck.shuffle(&mut rngs.deck);
         let initial_deck_order = deck.clone();
 
         let start_areas: Vec<_> = (0..num_players as u8)
@@ -186,7 +184,7 @@ impl InteractiveGame {
             }
         }
 
-        let starting_player = rules.starting_player(num_players, &mut rng);
+        let starting_player = rules.starting_player(num_players, &mut rngs.deck);
         let rules_name = rules.name().to_string();
 
         let history = GameHistory {
@@ -204,7 +202,7 @@ impl InteractiveGame {
         let mut game = Self {
             rules,
             board,
-            rng,
+            rngs,
             deck,
             discard: Vec::new(),
             hands,
@@ -296,7 +294,7 @@ impl InteractiveGame {
                     let mut engine = Engine {
                         rules: &*self.rules,
                         board: &mut self.board,
-                        rng: &mut self.rng,
+                        rng: &mut self.rngs.deck,
                         deck: &mut self.deck,
                         discard: &mut self.discard,
                     };
@@ -335,7 +333,8 @@ impl InteractiveGame {
             ActionNeeded::GameOver { .. } => Err(SorryError::GameAlreadyOver),
             ActionNeeded::ChooseCard { player, hand, .. } => {
                 let view = self.build_strategy_view(player, None);
-                let idx = strategy.choose_card(&view, &*self.rules, &mut self.rng);
+                let rng = &mut self.rngs.seats[player.0 as usize];
+                let idx = strategy.choose_card(&view, &*self.rules, rng);
                 let idx = idx.min(hand.len().saturating_sub(1));
                 Ok(PlayerAction::ChooseCard { hand_index: idx })
             }
@@ -345,7 +344,8 @@ impl InteractiveGame {
                 legal_moves: legal,
             } => {
                 let view = self.build_strategy_view(player, Some(card));
-                let mv = strategy.choose_move(&view, &*self.rules, card, &legal, &mut self.rng);
+                let rng = &mut self.rngs.seats[player.0 as usize];
+                let mv = strategy.choose_move(&view, &*self.rules, card, &legal, rng);
                 Ok(PlayerAction::PlayMove { mv })
             }
         }
@@ -518,7 +518,7 @@ impl InteractiveGame {
             let mut engine = Engine {
                 rules: &*self.rules,
                 board: &mut self.board,
-                rng: &mut self.rng,
+                rng: &mut self.rngs.deck,
                 deck: &mut self.deck,
                 discard: &mut self.discard,
             };

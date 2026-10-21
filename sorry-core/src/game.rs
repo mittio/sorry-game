@@ -3,13 +3,11 @@
 // builds. Do not switch to `rand::thread_rng` or `rand::rngs::OsRng` for
 // shuffles.
 
-use rand::SeedableRng;
-use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 
 use crate::board::{BoardState, PlayerId};
 use crate::card::Card;
-use crate::engine::Engine;
+use crate::engine::{Engine, GameRngs};
 use crate::error::{Result, SorryError};
 use crate::history::{Action, GameHistory, TurnRecord};
 use crate::moves::legal_moves;
@@ -20,7 +18,7 @@ pub struct Game {
     rules: Box<dyn Rules>,
     strategies: Vec<Box<dyn Strategy>>,
     board: BoardState,
-    rng: StdRng,
+    rngs: GameRngs,
     deck: Vec<Card>,
     discard: Vec<Card>,
     hands: Vec<Vec<Card>>,
@@ -56,9 +54,9 @@ impl Game {
             });
         }
 
-        let mut rng = StdRng::seed_from_u64(seed);
+        let mut rngs = GameRngs::new(seed, num_players);
         let mut deck = rules.build_deck();
-        deck.shuffle(&mut rng);
+        deck.shuffle(&mut rngs.deck);
         let initial_deck_order = deck.clone();
 
         let start_areas: Vec<_> = (0..num_players as u8)
@@ -75,7 +73,7 @@ impl Game {
             }
         }
 
-        let starting_player = rules.starting_player(num_players, &mut rng);
+        let starting_player = rules.starting_player(num_players, &mut rngs.deck);
         let strategy_names: Vec<String> = strategies.iter().map(|s| s.name().to_string()).collect();
         let rules_name = rules.name().to_string();
 
@@ -95,7 +93,7 @@ impl Game {
             rules,
             strategies,
             board,
-            rng,
+            rngs,
             deck,
             discard: Vec::new(),
             hands,
@@ -142,7 +140,7 @@ impl Game {
                 let mut engine = Engine {
                     rules: &*self.rules,
                     board: &mut self.board,
-                    rng: &mut self.rng,
+                    rng: &mut self.rngs.deck,
                     deck: &mut self.deck,
                     discard: &mut self.discard,
                 };
@@ -159,7 +157,7 @@ impl Game {
                 let idx = self.strategies[self.current.0 as usize].choose_card(
                     &view,
                     &*self.rules,
-                    &mut self.rng,
+                    &mut self.rngs.seats[self.current.0 as usize],
                 );
                 let idx = idx.min(self.hands[self.current.0 as usize].len() - 1);
                 let chosen = self.hands[self.current.0 as usize].remove(idx);
@@ -178,7 +176,7 @@ impl Game {
                 &*self.rules,
                 chosen,
                 &legal,
-                &mut self.rng,
+                &mut self.rngs.seats[self.current.0 as usize],
             );
             if !legal.contains(&chosen_move) {
                 return Err(SorryError::InvalidMove(format!(
@@ -192,7 +190,7 @@ impl Game {
                 let mut engine = Engine {
                     rules: &*self.rules,
                     board: &mut self.board,
-                    rng: &mut self.rng,
+                    rng: &mut self.rngs.deck,
                     deck: &mut self.deck,
                     discard: &mut self.discard,
                 };
